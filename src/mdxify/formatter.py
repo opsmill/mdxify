@@ -93,14 +93,21 @@ def format_docstring_with_griffe(docstring: str, style: str = "google") -> str:
                 if isinstance(section.value, list):
                     for item in section.value:
                         if isinstance(item, tuple) and len(item) == 2:
-                            _, text = item
-                            lines.append(text.strip())
+                            kind, text = item
+                            if getattr(kind, "value", kind) == "examples":
+                                # Doctest blocks carry no fence of their own
+                                lines.append("```python")
+                                lines.append(text.strip())
+                                lines.append("```")
+                            else:
+                                lines.append(text.strip())
                         else:
                             lines.append(str(item).strip())
+                        lines.append("")
                 else:
                     # Fallback for unexpected format
                     lines.append(str(section.value).strip())
-                lines.append("")
+                    lines.append("")
 
         return "\n".join(lines)
 
