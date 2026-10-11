@@ -157,6 +157,89 @@ def test_format_docstring_with_examples_section():
     assert "**Args:**" in result
 
 
+def test_format_docstring_examples_doctest_is_fenced():
+    """Doctest blocks in an Examples section are wrapped in a code fence.
+
+    Regression test for issue #49.
+    """
+    docstring = '''Summarize in one line.
+
+    Examples:
+        >>> doctest_style()
+        {'k': 'v'}
+    '''
+
+    result = format_docstring_with_griffe(docstring)
+
+    assert "```python\n>>> doctest_style()\n{'k': 'v'}\n```" in result
+
+
+def test_format_docstring_examples_mixed_prose_and_doctest():
+    """Prose stays outside the fence, doctests go inside, order is preserved."""
+    docstring = '''Summarize in one line.
+
+    Examples:
+        Some prose.
+
+        >>> f()
+        1
+
+        More prose.
+    '''
+
+    result = format_docstring_with_griffe(docstring)
+
+    fenced = "```python\n>>> f()\n1\n```"
+    assert fenced in result
+    assert "Some prose.\n\n" + fenced + "\n\nMore prose." in result
+
+
+def test_format_docstring_examples_hand_fenced_not_double_fenced():
+    """A hand-fenced example is left as-is."""
+    docstring = '''Summarize in one line.
+
+    Examples:
+        ```python
+        hand_fenced()
+        ```
+    '''
+
+    result = format_docstring_with_griffe(docstring)
+
+    assert result.count("```python") == 1
+    assert "```python\nhand_fenced()\n```" in result
+
+
+def test_format_docstring_examples_doctest_numpy_style():
+    """NumPy-style Examples doctests are fenced too."""
+    docstring = '''Summarize in one line.
+
+    Examples
+    --------
+    >>> f()
+    {'k': 'v'}
+    '''
+
+    result = format_docstring_with_griffe(docstring, style="numpy")
+
+    assert "```python\n>>> f()\n{'k': 'v'}\n```" in result
+
+
+def test_fenced_doctest_is_not_escaped():
+    """Content inside a fenced doctest is left untouched by MDX escaping."""
+    docstring = '''Summarize in one line.
+
+    Examples:
+        >>> f()
+        <Foo object>
+    '''
+
+    result = escape_mdx_content(format_docstring_with_griffe(docstring))
+
+    assert "<Foo object>" in result
+    assert "&lt;" not in result
+
+
 def test_format_docstring_with_attributes_section():
     """Test that Attributes section in class docstrings is rendered correctly.
 
