@@ -274,3 +274,119 @@ def test_generate_mdx_with_content(tmp_path):
     assert "A test class." in content
     assert "#### `test_method`" in content
     assert "test_method(self)" in content
+
+MIXED_MODULE_INFO = {
+    "name": "pkg.mixed",
+    "docstring": "Module docstring.",
+    "functions": [
+        {
+            "name": "helper_one",
+            "signature": "helper_one(x: int) -> str",
+            "docstring": "First helper.",
+            "line": 5,
+        },
+        {
+            "name": "helper_two",
+            "signature": "helper_two() -> None",
+            "docstring": "",
+            "line": 9,
+        },
+    ],
+    "classes": [
+        {
+            "name": "Client",
+            "docstring": "A client.",
+            "line": 12,
+            "methods": [
+                {
+                    "name": "connect",
+                    "signature": "connect(self) -> None",
+                    "docstring": "Open a connection.",
+                    "line": 15,
+                }
+            ],
+        }
+    ],
+    "source_file": "/path/to/pkg/mixed.py",
+}
+
+# Output of mdxify v0.2.45 for MIXED_MODULE_INFO; the default order must not change.
+MIXED_MODULE_EXPECTED = (
+    "---\ntitle: mixed\nsidebarTitle: mixed\n---\n\n# `pkg.mixed`\n\n\nModule docstring.\n\n"
+    "## Functions\n\n### `helper_one`\n\n```python\nhelper_one(x: int) -> str\n```\n\n\n"
+    "First helper.\n\n\n### `helper_two`\n\n```python\nhelper_two() -> None\n```\n\n"
+    "## Classes\n\n### `Client`\n\n\nA client.\n\n\n**Methods:**\n\n#### `connect`\n\n"
+    "```python\nconnect(self) -> None\n```\n\nOpen a connection.\n\n"
+)
+
+
+def test_generate_mdx_default_output_unchanged(tmp_path):
+    """The default section order produces the same page as before the option existed."""
+    output_file = tmp_path / "pkg-mixed.mdx"
+    generate_mdx(MIXED_MODULE_INFO, output_file)
+
+    assert output_file.read_text() == MIXED_MODULE_EXPECTED
+
+
+def _section(content: str, heading: str) -> str:
+    """Return the text of one H2 section, from its heading to the next H2 or the end."""
+    start = content.index(heading)
+    end = content.find("\n## ", start + len(heading))
+    return content[start:] if end == -1 else content[start:end + 1]
+
+
+def test_generate_mdx_explicit_functions_first_matches_default(tmp_path):
+    """section_order="functions-first" is the same as the default."""
+    output_file = tmp_path / "pkg-mixed.mdx"
+    generate_mdx(MIXED_MODULE_INFO, output_file, section_order="functions-first")
+
+    assert output_file.read_text() == MIXED_MODULE_EXPECTED
+
+
+def test_generate_mdx_classes_first(tmp_path):
+    """section_order="classes-first" moves Classes above Functions without changing either."""
+    output_file = tmp_path / "pkg-mixed.mdx"
+    generate_mdx(MIXED_MODULE_INFO, output_file, section_order="classes-first")
+    content = output_file.read_text()
+
+    assert content.index("## Classes") < content.index("## Functions")
+    assert content.index("Module docstring.") < content.index("## Classes")
+    for heading in ("## Functions", "## Classes"):
+        assert _section(content, heading).rstrip("\n") == _section(
+            MIXED_MODULE_EXPECTED, heading
+        ).rstrip("\n")
+
+
+@pytest.mark.parametrize("missing", ["functions", "classes"])
+def test_generate_mdx_single_section_unaffected_by_order(tmp_path, missing):
+    """A page with only one of the two sections is identical with either order."""
+    module_info = {**MIXED_MODULE_INFO, missing: []}
+    functions_first = tmp_path / "functions-first.mdx"
+    classes_first = tmp_path / "classes-first.mdx"
+    generate_mdx(module_info, functions_first, section_order="functions-first")
+    generate_mdx(module_info, classes_first, section_order="classes-first")
+
+    assert functions_first.read_text() == classes_first.read_text()
+
+
+def test_generate_mdx_classes_first_markdown(tmp_path):
+    """The section order also applies to Markdown output."""
+    output_file = tmp_path / "pkg-mixed.md"
+    generate_mdx(
+        MIXED_MODULE_INFO,
+        output_file,
+        renderer=MarkdownRenderer(),
+        section_order="classes-first",
+    )
+    content = output_file.read_text()
+
+    assert content.index("## Classes") < content.index("## Functions")
+
+
+def test_generate_mdx_rejects_unknown_section_order(tmp_path):
+    """An unknown section_order raises ValueError and writes nothing."""
+    output_file = tmp_path / "pkg-mixed.mdx"
+    with pytest.raises(ValueError, match="functions-first, classes-first"):
+        generate_mdx(MIXED_MODULE_INFO, output_file, section_order="foo")
+
+    assert not output_file.exists()
