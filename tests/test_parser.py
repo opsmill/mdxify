@@ -215,6 +215,113 @@ def test_inherited_decorated_members_from_private_module(tmp_path, monkeypatch):
         assert prop["source_file"] == str(base_file)
 
 
+@pytest.mark.parametrize("decorator", ["overload", "typing.overload", "typing_extensions.overload"])
+@pytest.mark.parametrize("prefix", ["", "async "])
+def test_overload_stubs_skipped(tmp_path, decorator, prefix):
+    module_file = tmp_path / "mre.py"
+    module_file.write_text(dedent(f'''\
+        import typing
+        import typing_extensions
+        from typing import overload
+
+        class Thing:
+            @{decorator}
+            {prefix}def get(self, key: str) -> str: ...
+            @{decorator}
+            {prefix}def get(self, key: int) -> int: ...
+            {prefix}def get(self, key):
+                """Real implementation."""
+                return key
+
+        @{decorator}
+        {prefix}def f(x: int) -> int: ...
+        @{decorator}
+        {prefix}def f(x: str) -> str: ...
+        {prefix}def f(x):
+            """Impl."""
+            return x
+    '''))
+    module = parse_module_fast("mre", module_file)
+    methods = module["classes"][0]["methods"]
+    assert [(m["signature"], m["docstring"], m["line"]) for m in methods] == [
+        ("get(self, key)", "Real implementation.", 10),
+    ]
+    assert [(f["signature"], f["docstring"], f["line"]) for f in module["functions"]] == [
+        ("f(x)", "Impl.", 18),
+    ]
+
+
+def test_overload_stubs_with_stacked_decorators(tmp_path):
+    module_file = tmp_path / "mre.py"
+    module_file.write_text(dedent('''\
+        from typing import overload
+
+        class Thing:
+            @overload
+            @staticmethod
+            def sm(x: int) -> int: ...
+            @staticmethod
+            @overload
+            def sm(x: str) -> str: ...
+            @staticmethod
+            def sm(x):
+                """Static impl."""
+            @classmethod
+            @overload
+            def cm(cls, x: int) -> int: ...
+            @classmethod
+            def cm(cls, x):
+                """Class impl."""
+    '''))
+    methods = parse_module_fast("mre", module_file)["classes"][0]["methods"]
+    assert [(m["name"], m["kind"], m["signature"], m["docstring"]) for m in methods] == [
+        ("sm", "static", "sm(x)", "Static impl."),
+        ("cm", "class", "cm(x)", "Class impl."),
+    ]
+
+
+def test_overload_stub_does_not_replace_property(tmp_path):
+    module_file = tmp_path / "mre.py"
+    module_file.write_text(dedent('''\
+        from typing import overload
+
+        class Thing:
+            @property
+            def value(self) -> int:
+                """The value."""
+            @overload
+            def value(self, x: int) -> int: ...
+    '''))
+    cls = parse_module_fast("mre", module_file)["classes"][0]
+    assert cls["methods"] == []
+    assert [p["name"] for p in cls["properties"]] == ["value"]
+
+
+def test_inherited_overloaded_method(tmp_path, monkeypatch):
+    base_file = tmp_path / "_internal.py"
+    base_file.write_text(dedent('''\
+        import typing
+
+        class _Base:
+            @typing.overload
+            def get(self, key: str) -> str: ...
+            @typing.overload
+            def get(self, key: int) -> int: ...
+            def get(self, key):
+                """Base get."""
+    '''))
+    child_file = tmp_path / "public.py"
+    child_file.write_text("class Child(_Base):\n    pass\n")
+    files = {"_internal": base_file, "public": child_file}
+    monkeypatch.setattr("mdxify.discovery.find_all_modules", lambda root: list(files))
+    monkeypatch.setattr("mdxify.discovery.get_module_source_file", files.get)
+
+    child = parse_modules_with_inheritance(["public"])["public"]["classes"][0]
+    assert [(m["signature"], m["docstring"], m["is_inherited"]) for m in child["methods"]] == [
+        ("get(self, key)", "Base get.", True),
+    ]
+
+
 @pytest.mark.parametrize("base_member,local_member,expected_kind", [
     ("@property\ndef value(self) -> str:\n    pass", "@property\ndef value(self) -> int:\n    pass", "property"),
     ("@property\ndef value(self) -> str:\n    pass", "def value(self):\n    pass", "method"),

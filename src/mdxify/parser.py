@@ -109,6 +109,18 @@ def _builtin_decorator_name(decorator: ast.expr) -> str | None:
     return None
 
 
+def _is_overload(decorator: ast.expr) -> bool:
+    """Recognize ``@overload`` and ``@typing.overload`` without resolving imports."""
+    if isinstance(decorator, ast.Name):
+        return decorator.id == "overload"
+    return (
+        isinstance(decorator, ast.Attribute)
+        and decorator.attr == "overload"
+        and isinstance(decorator.value, ast.Name)
+        and decorator.value.id in {"typing", "typing_extensions"}
+    )
+
+
 def _member_binding_names(item: ast.stmt) -> set[str]:
     """Collect names bound directly in a class body, excluding type-only hints."""
     if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -139,6 +151,8 @@ def extract_class_members(
                 properties.pop(name, None)
             continue
         if not include_internal and item.name.startswith("_"):
+            continue
+        if any(_is_overload(d) for d in item.decorator_list):
             continue
 
         decorators = {_builtin_decorator_name(d) for d in item.decorator_list}
@@ -331,11 +345,7 @@ def parse_module_fast(module_name: str, source_file: Path, include_internal: boo
 
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and (include_internal or not node.name.startswith("_")):
             # Skip overloaded function definitions
-            has_overload = any(
-                isinstance(decorator, ast.Name) and decorator.id == "overload"
-                for decorator in node.decorator_list
-            )
-            if not has_overload:
+            if not any(_is_overload(d) for d in node.decorator_list):
                 func_info = {
                     "name": node.name,
                     "signature": extract_function_signature(node),
