@@ -50,6 +50,38 @@ def test_generate_property_and_method_kinds(tmp_path, renderer):
     assert "#### `ordinary`\n\n```python\nordinary(self)\n```" in content
 
 
+@pytest.mark.parametrize("renderer", [MDXRenderer(), MarkdownRenderer()], ids=["mdx", "md"])
+def test_generate_overloaded_members_once(tmp_path, renderer):
+    source = tmp_path / "mre.py"
+    source.write_text(dedent('''
+        import typing
+        from typing import overload
+
+        class Thing:
+            """A thing."""
+            @overload
+            def get(self, key: str) -> str: ...
+            @overload
+            def get(self, key: int) -> int: ...
+            def get(self, key):
+                """Real implementation."""
+
+        @typing.overload
+        def f(x: int) -> int: ...
+        @typing.overload
+        def f(x: str) -> str: ...
+        def f(x):
+            """Impl."""
+    '''))
+    output = tmp_path / f"mre.{renderer.file_extension}"
+    assert generate_mdx(parse_module_fast("mre", source), output, renderer=renderer) is True
+    content = output.read_text()
+    assert content.count("`get`") == 1
+    assert "```python\nget(self, key)\n```" in content
+    assert content.count("`f`") == 1
+    assert "f(x: int)" not in content and "get(self, key: str)" not in content
+
+
 @pytest.mark.parametrize("setter,deleter,label", [
     (False, False, "*Read-only.*"),
     (True, False, "*Read/write.*"),
